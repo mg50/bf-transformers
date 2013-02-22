@@ -4,14 +4,19 @@ import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Trans.State
 import Data.List
+import Data.Char
+import Text.ParserCombinators.Parsec
 
 updateAt :: Int -> (a -> a) -> [a] -> [a]
 updateAt idx f xs = take (idx) xs ++ [f x] ++ drop (idx + 1) xs
   where x = xs !! idx
 
+display :: String -> String
+display str = [ if x == ',' then ' ' else x | x <- str ]
+
 ------------
 
-type Cell = Integer
+type Cell = Int
 type Board = [Cell]
 type Head = Int
 
@@ -60,13 +65,15 @@ right = do modify succ
 
 dump :: BFState ()
 dump = do cur <- currentValue
-          liftIO $ print $ show cur
-          modifyCurrent $ const 0
+          liftIO $ putChar (chr cur)
 
+input :: BFState ()
+input = do char <- liftIO getChar
+           modifyCurrent $ const (ord char)
 
 ------------
 
-data Command = MoveLeft | MoveRight | Inc | Dec | Dump | Loop [Command]
+data Command = MoveLeft | MoveRight | Inc | Dec | Dump | Input | Loop [Command] deriving (Show)
 
 doCommand :: BFState () -> Command -> BFState ()
 doCommand s MoveLeft = s >> left
@@ -74,6 +81,7 @@ doCommand s MoveRight = s >> right
 doCommand s Inc = s >> inc
 doCommand s Dec = s >> dec
 doCommand s Dump = s >> dump
+doCommand s Input = s >> input
 doCommand s (Loop commands) = s >> do cur <- currentValue
                                       if cur == 0
                                          then return ()
@@ -82,3 +90,42 @@ doCommand s (Loop commands) = s >> do cur <- currentValue
 
 run :: [Command] -> Underlying (((), Head), Board)
 run commands = runBFState $ foldl' doCommand (return ()) commands
+
+------------
+
+op :: Char -> Command
+op c = case c of
+  '<' -> MoveLeft
+  '>' -> MoveRight
+  '+' -> Inc
+  '-' -> Dec
+  '.' -> Dump
+  ',' -> Input
+
+simpleExpr :: Parser Command
+simpleExpr = do c <- oneOf "<>+-.,"
+                return $ op c
+
+loopExpr :: Parser Command
+loopExpr = do char '['
+              exprs <- many expr
+              char ']'
+              return $ Loop exprs
+
+expr :: Parser Command
+expr = simpleExpr <|> loopExpr
+
+program :: Parser [Command]
+program = many1 expr
+
+------------
+
+main :: IO ()
+main = forever $ do putStr "enter program: "
+                    prog <- getLine
+                    case parse program "" prog of
+                      Left err       -> putStrLn $ show err
+                      Right commands -> do putStr "output: "
+                                           (_, board ) <- run commands
+                                           putStrLn $ "\nboard: " ++ display (show board)
+                                           putStrLn ""
